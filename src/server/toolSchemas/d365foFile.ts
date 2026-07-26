@@ -113,6 +113,31 @@ Model from .mcp.json; prefix auto-applied from EXTENSION_PREFIX. Classes: member
             'Provenance token from prepare(change/create). Required for *-extension objectTypes when ' +
             'GROUNDING_ENFORCE=true; object-bound — only valid for the object it was issued for.',
         },
+        // action=create, data entity SET mode (sourceTable present)
+        sourceTable: {
+          type: 'string',
+          description:
+            'Table to build a full data entity SET from: entity + DMF staging table + View/Maintain ' +
+            'privileges, written as 4 objects (rolled back together on failure). Everything else — ' +
+            'fields, EDTs, label, entity key — is read from this table. Omit for a normal single-file create.',
+        },
+        entityName: {
+          type: 'string',
+          description: 'Set mode: entity AOT name, e.g. "ConMyThingEntity". Defaults to objectName.',
+        },
+        titleField1: {
+          type: 'string',
+          description: 'Set mode: staging TitleField1. Defaults to the source table’s 1st field (the bridge cannot read it).',
+        },
+        titleField2: {
+          type: 'string',
+          description: 'Set mode: staging TitleField2. Defaults to the source table’s 2nd field.',
+        },
+        keyFields: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Set mode: entity key fields. Defaults to the source table’s primary index.',
+        },
         // action=modify only
         operation: {
           type: 'string',

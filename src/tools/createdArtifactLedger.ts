@@ -63,6 +63,46 @@ export function forgetCreatedArtifact(filePath: string): void {
   ledger.delete(ledgerKey(filePath));
 }
 
+/**
+ * Every artifact recorded this session, in creation order (Map preserves
+ * insertion order). Returned as a copied array so callers can iterate — or
+ * reverse it to roll back most-recent-first — without mutating the ledger.
+ *
+ * Added for the multi-artifact create path (the data entity set writes four
+ * files in one call): a caller that must undo the artifacts it already wrote
+ * needs their paths, and `handleCreateD365File` returns only a human-readable
+ * message, not the path it recorded.
+ */
+export function listCreatedArtifacts(): CreatedArtifact[] {
+  return [...ledger.values()];
+}
+
+/**
+ * Find a recorded artifact by its AOT object name, optionally narrowed by
+ * object type. Matching is case-insensitive because AOT identifiers are
+ * case-insensitive in X++ — the same reason `ledgerKey` lowercases paths.
+ *
+ * Returns the MOST RECENTLY recorded match: if a session created and rolled
+ * back an object and then created it again, the live entry is the one that
+ * matters. Returns undefined when nothing matches.
+ */
+export function findCreatedArtifactByName(
+  objectName: string,
+  objectType?: string,
+): CreatedArtifact | undefined {
+  if (!objectName) return undefined;
+  const wantedName = objectName.toLowerCase();
+  const wantedType = objectType?.toLowerCase();
+
+  let found: CreatedArtifact | undefined;
+  for (const entry of ledger.values()) {
+    if (entry.objectName?.toLowerCase() !== wantedName) continue;
+    if (wantedType && entry.objectType?.toLowerCase() !== wantedType) continue;
+    found = entry; // keep scanning — last match wins
+  }
+  return found;
+}
+
 /** Test-only: reset the module singleton between cases. */
 export function _clearCreatedArtifactLedger(): void {
   ledger.clear();

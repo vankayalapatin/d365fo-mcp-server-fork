@@ -4,8 +4,7 @@ import fs from 'fs';
 import { promises as fsp } from 'fs';
 import path from 'path';
 import type { XppServerContext } from '../types/context.js';
-import { bridgeRefreshProvider } from '../bridge/index.js';
-import { lookupCreatedArtifact, forgetCreatedArtifact, type CreatedArtifact } from './createdArtifactLedger.js';
+import { rollbackCreatedArtifact, cleanupIndexAfterUndo } from './rollbackCreatedArtifact.js';
 
 const execFileAsync = util.promisify(execFile);
 
@@ -152,88 +151,30 @@ async function undoViaLedger(
   absolutePath: string,
   context: XppServerContext,
 ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean } | null> {
-  const entry = lookupCreatedArtifact(absolutePath);
-  if (!entry) return null;
+  const outcome = await rollbackCreatedArtifact(absolutePath, context);
 
-  if (!fs.existsSync(absolutePath)) {
-    // Already gone (e.g. removed by hand). Still clean the project + index and
-    // forget the ledger entry so the run's state is consistent.
-    await removeFromProjectSafe(entry);
-    forgetCreatedArtifact(absolutePath);
-    await cleanupIndexAfterUndo(context, absolutePath, 'deleted');
-    return {
-      content: [{ type: 'text', text: 'File already removed; cleaned project + index entries for session-created object: ' + absolutePath }],
-    };
-  }
+  switch (outcome.status) {
+    case 'not-recorded':
+      return null;
 
-  const stat = await fsp.stat(absolutePath);
-  if (!stat.isFile()) {
-    return {
-      content: [{ type: 'text', text: 'Refusing to delete non-file path: ' + absolutePath }],
-      isError: true,
-    };
-  }
+    case 'already-absent':
+      return {
+        content: [{ type: 'text', text: 'File already removed; cleaned project + index entries for session-created object: ' + absolutePath }],
+      };
 
-  fs.unlinkSync(absolutePath);
-  await removeFromProjectSafe(entry);
-  forgetCreatedArtifact(absolutePath);
-  await cleanupIndexAfterUndo(context, absolutePath, 'deleted');
+    case 'refused-not-a-file':
+      return {
+        content: [{ type: 'text', text: 'Refusing to delete non-file path: ' + absolutePath }],
+        isError: true,
+      };
 
-  const projectNote = entry.projectPath
-    ? '\nRemoved its project entry from ' + path.basename(entry.projectPath) + '.'
-    : '';
-  return {
-    content: [{ type: 'text', text: 'Successfully undid file creation (deleted session-created file outside git): ' + absolutePath + projectNote + '\nStale index entries cleaned up.' }],
-  };
-}
-
-/**
- * Best-effort reversal of create_d365fo_file's addToProject. Non-fatal: a failure
- * to touch the .rnrproj must never abort the file deletion that already succeeded.
- * Uses a dynamic import to avoid a static dependency cycle with createD365File.ts.
- */
-async function removeFromProjectSafe(entry: CreatedArtifact): Promise<void> {
-  if (!entry.projectPath || !entry.objectType || !entry.objectName) return;
-  try {
-    const { ProjectFileManager } = await import('./createD365File.js');
-    await new ProjectFileManager().removeFromProject(entry.projectPath, entry.objectType, entry.objectName);
-  } catch (e) {
-    console.error(`[undo] Non-git project cleanup failed (non-fatal): ${e}`);
-  }
-}
-
-/**
- * Clean up the symbol index, label index, and bridge after a file is reverted or
- * deleted by undo_last_modification. Deleted files: remove stale symbols + labels.
- * Reverted files: re-index from the restored content.
- */
-async function cleanupIndexAfterUndo(
-  context: XppServerContext,
-  filePath: string,
-  action: 'deleted' | 'reverted',
-): Promise<void> {
-  const { symbolIndex } = context;
-
-  try {
-    const { deletedCount } = symbolIndex?.removeSymbolsByFile?.(filePath) ?? { deletedCount: 0 };
-    console.error(`[undo] Removed ${deletedCount} stale symbol(s) for ${path.basename(filePath)}`);
-
-    const labelCount = symbolIndex?.removeLabelsByFile?.(filePath) ?? 0;
-    if (labelCount > 0) {
-      console.error(`[undo] Removed ${labelCount} stale label(s) for ${path.basename(filePath)}`);
+    case 'rolled-back': {
+      const projectNote = outcome.entry.projectPath
+        ? '\nRemoved its project entry from ' + path.basename(outcome.entry.projectPath) + '.'
+        : '';
+      return {
+        content: [{ type: 'text', text: 'Successfully undid file creation (deleted session-created file outside git): ' + absolutePath + projectNote + '\nStale index entries cleaned up.' }],
+      };
     }
-
-    try {
-      await bridgeRefreshProvider(context.bridge);
-    } catch { /* bridge not available */ }
-
-    if (action === 'reverted' && fs.existsSync(filePath)) {
-      // Dynamic import to avoid a circular dependency
-      const { updateSymbolIndexTool } = await import('./updateSymbolIndex.js');
-      await updateSymbolIndexTool({ filePath }, context);
-      console.error(`[undo] Re-indexed reverted file: ${path.basename(filePath)}`);
-    }
-  } catch (e) {
-    console.error(`[undo] Index cleanup failed (non-fatal): ${e}`);
   }
 }

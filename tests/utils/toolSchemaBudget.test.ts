@@ -32,8 +32,14 @@ const CHARS_PER_TOKEN = 4;
 // aggregate-measurement, license-code) that took the T flag green on the last
 // create-path holes in the taxonomy.
 // Headroom is small on purpose so creep is caught early.
-const TOTAL_BUDGET = 63_300;
-const LARGEST_TOOL_BUDGET = 9_800;
+//
+// Raised +859 chars for d365fo_file's data entity SET mode: the sourceTable /
+// entityName / titleField1 / titleField2 / keyFields params that turn
+// action="create" into a four-artifact set (entity + DMF staging table +
+// View/Maintain privileges) instead of a single file. A new capability on an
+// existing facade rather than a 27th tool, so the tool COUNT is unchanged.
+const TOTAL_BUDGET = 64_200;
+const LARGEST_TOOL_BUDGET = 10_700;
 
 async function getTools(): Promise<Array<{ name: string }>> {
   const ctx: any = { symbolIndex: {}, parser: {} };

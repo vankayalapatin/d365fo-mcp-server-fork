@@ -19,6 +19,7 @@ import type { XppServerContext } from '../types/context.js';
 import { handleGenerateD365Xml } from './generateD365Xml.js';
 import { handleCreateD365File } from './createD365File.js';
 import { modifyD365FileTool } from './modifyD365File.js';
+import { isDataEntitySetRequest, handleDataEntitySetCreate } from './dataEntitySet/facade.js';
 
 export const D365_FILE_ACTIONS = ['generate', 'create', 'modify'] as const;
 export type D365FileAction = (typeof D365_FILE_ACTIONS)[number];
@@ -59,6 +60,16 @@ export async function d365foFileTool(request: CallToolRequest, context: XppServe
       : flat;
 
   if (action === 'create') {
+    // Set mode: `sourceTable` asks for a complete data entity set (entity +
+    // DMF staging table + view/maintain privileges) instead of one file.
+    //
+    // The branch MUST be here, not inside handleCreateD365File: the orchestrator
+    // calls that handler four times internally, so detecting set mode any deeper
+    // would make each of those calls re-enter set mode and recurse without
+    // bound. Without `sourceTable` this path is untouched.
+    if (isDataEntitySetRequest(rest)) {
+      return handleDataEntitySetCreate(rest, context);
+    }
     return handleCreateD365File(subRequest('create_d365fo_file', rest), context);
   }
   if (action === 'modify') {
